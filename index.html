@@ -415,3 +415,130 @@
 </body>
   </html>
 
+const form = document.querySelector(".composer");
+const input = form?.querySelector("input[type='text'], textarea");
+const messagesEl = document.querySelector(".messages");
+const statusEl = document.querySelector(".chat-state");
+const fileInput = document.querySelector("input[type='file']");
+const attachBtn = document.querySelector(".icon-btn");
+const previewBox = document.querySelector(".preview");
+const previewImg = previewBox?.querySelector("img");
+const removePreviewBtn = previewBox?.querySelector("button");
+const menuBtn = document.querySelector(".menu");
+const navEl = document.querySelector("nav");
+
+const history = [];
+let attachedFile = null;
+
+function setStatus(text) {
+  if (statusEl) statusEl.textContent = text;
+}
+
+function appendMessage(role, text, imageUrl = "") {
+  if (!messagesEl) return;
+  const item = document.createElement("div");
+  item.className = `message message--${role}`;
+
+  if (imageUrl) {
+    const img = document.createElement("img");
+    img.src = imageUrl;
+    img.alt = "Uploaded attachment";
+    item.appendChild(img);
+  }
+
+  const p = document.createElement("p");
+  p.textContent = text;
+  item.appendChild(p);
+
+  messagesEl.appendChild(item);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function clearAttachment() {
+  attachedFile = null;
+  if (fileInput) fileInput.value = "";
+  if (previewImg) previewImg.src = "";
+  if (previewBox) previewBox.hidden = true;
+}
+
+if (menuBtn && navEl) {
+  menuBtn.addEventListener("click", () => {
+    navEl.classList.toggle("is-open");
+  });
+}
+
+if (attachBtn && fileInput) {
+  attachBtn.addEventListener("click", () => fileInput.click());
+}
+
+if (fileInput) {
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+
+    if (file.size > 4 * 1024 * 1024) {
+      setStatus("Image must be under 4 MB.");
+      fileInput.value = "";
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      const commaIndex = result.indexOf(",");
+      if (commaIndex === -1) return;
+      const base64 = result.slice(commaIndex + 1);
+      attachedFile = { base64, mimeType: file.type };
+      if (previewImg) previewImg.src = result;
+      if (previewBox) previewBox.hidden = false;
+      setStatus("");
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+if (removePreviewBtn) {
+  removePreviewBtn.addEventListener("click", clearAttachment);
+}
+
+if (form && input) {
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text && !attachedFile) return;
+
+    const currentImage = attachedFile;
+    const previewSrc = previewImg?.src || "";
+
+    appendMessage("user", text || "[Image attached]", currentImage ? previewSrc : "");
+    input.value = "";
+    clearAttachment();
+    setStatus("Thinking...");
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: text,
+          imageBase64: currentImage?.base64 || "",
+          mimeType: currentImage?.mimeType || "",
+          history
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Request failed");
+      }
+
+      appendMessage("assistant", data.reply);
+      if (text) {
+        history.push({ role: "user", text }, { role: "model", text: data.reply });
+      }
+      setStatus("");
+    } catch (err) {
+      setStatus(err.message || "Something went wrong.");
+    }
+  });
+}
